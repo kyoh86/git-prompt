@@ -16,7 +16,6 @@ func main() {
 	branch := os.Args[1]
 
 	if !gitWorking() {
-		fmt.Fprintf(os.Stderr, "is not working directory")
 		os.Exit(1)
 	}
 
@@ -24,22 +23,29 @@ func main() {
 		fmt.Println("hook_com[untracked]=\"true\"")
 	}
 
-	fmt.Printf("hook_com[email]=%s\n", gitEmail())
-	fmt.Printf("hook_com[ahead]=%d\n", gitAhead(branch))
-	baseBranch := gitBaseBranch(branch)
-	fmt.Printf("hook_com[base_branch]=%s\n", baseBranch)
-	fmt.Printf("hook_com[base_behind]=%d\n", gitBehindFrom(branch, baseBranch))
+	fmt.Printf("hook_com[email]=%q\n", gitEmail())
 	fmt.Printf("hook_com[stash_count]=%d\n", gitStash())
+	fmt.Printf("hook_com[upstream]=%q\n", gitUpstream())
+	fmt.Printf("hook_com[ahead]=%d\n", gitAhead(branch))
+	fmt.Printf("hook_com[behind]=%d\n", gitBehind(branch))
+	lastEmail, lastMessage := gitLastCommit()
+	fmt.Printf("hook_com[last_email]=%q\n", lastEmail)
+	fmt.Printf("hook_com[last_message]=%q\n", lastMessage)
+	baseBranch := gitBaseBranch(branch)
+	fmt.Printf("hook_com[base_branch]=%q\n", baseBranch)
+	fmt.Printf("hook_com[base_behind]=%d\n", gitBehindFrom(branch, baseBranch))
 }
 
 func git(args ...string) []byte {
 	command := exec.Command("git", args...)
-	command.Stderr = os.Stderr
-	output, err := command.Output()
-	if err != nil {
-		os.Exit(-1)
+	output, _ := command.Output()
+	// if err != nil {
+	// 	os.Exit(-1)
+	// }
+	if output == nil {
+		return []byte{}
 	}
-	return output
+	return bytes.TrimSpace(output)
 }
 
 func scan(buf []byte) *bufio.Scanner {
@@ -55,8 +61,12 @@ func count(buf []byte) int {
 	return count
 }
 
+func gitUpstream() string {
+	return string(git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"))
+}
+
 func gitWorking() bool {
-	return string(git("rev-parse", "--is-inside-work-tree")) == "true\n"
+	return string(git("rev-parse", "--is-inside-work-tree")) == "true"
 }
 
 func gitUntrack() bool {
@@ -120,11 +130,11 @@ func gitBaseBranch(branch string) string {
 }
 
 func gitEmail() string {
-	return strings.TrimSpace(string(git("config", "user.email")))
+	return string(git("config", "user.email"))
 }
 
-func gitHead(branch string) (email, message string) {
-	head := git("log", "-n1", "--pretty=\"format:%ce %s\"")
+func gitLastCommit() (email, message string) {
+	head := git("log", "-n1", "--pretty=%ce %s")
 	fields := bytes.Fields(head)
 	if len(fields) > 0 {
 		email = string(fields[0])
