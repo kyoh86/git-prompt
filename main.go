@@ -116,7 +116,10 @@ func gitBaseBranch(branch string) string {
 		if maxMatched > remoteLength {
 			continue
 		}
-		if bytes.HasPrefix(branchBytes, append(remoteFields[1], '-')) {
+		if bytes.HasPrefix(branchBytes, append(remoteFields[1], '/')) {
+			maxMatched = remoteLength
+			baseBranchBytes = remoteBranch
+		} else if bytes.HasPrefix(branchBytes, append(remoteFields[1], '-')) {
 			maxMatched = remoteLength
 			baseBranchBytes = remoteBranch
 		}
