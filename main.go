@@ -314,7 +314,7 @@ func runGit(args ...string) []byte {
 	if output == nil {
 		return []byte{}
 	}
-	return bytes.TrimSpace(output)
+	return output
 }
 
 func scan(buf []byte) *bufio.Scanner {
