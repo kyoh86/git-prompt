@@ -99,6 +99,9 @@ func main() {
 	var root string
 	for {
 		parent, name := filepath.Split(needle)
+		if parent == needle {
+			break
+		}
 		parent = strings.TrimRight(parent, string([]rune{filepath.Separator}))
 		if name == ".git" {
 			root = parent
