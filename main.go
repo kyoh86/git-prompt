@@ -143,7 +143,7 @@ func main() {
 		if line[0] == '?' || line[1] == '?' {
 			untracked = true
 		}
-		if line[0] == 'M' || line[0] == 'D' || line[0] == 'R' {
+		if line[0] == 'M' || line[0] == 'D' || line[0] == 'R' || line[0] == 'A' {
 			staged = true
 		}
 		if line[1] == 'M' || line[1] == 'D' {
