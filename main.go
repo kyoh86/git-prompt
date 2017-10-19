@@ -109,15 +109,15 @@ func countCommit(rep *git.Repository, toCommit *object.Commit, fromCommit *objec
 func main() {
 	templates := map[string]string{
 		"prompt": `%F{yellow}
-	{{- if .Staged    -}} + {{- end -}}
-	{{- if .Unstaged  -}} - {{- end -}}
-	{{- if .Untracked -}} ? {{- end -}}
+	{{- if eq .Staged true -}}    + {{- end -}}
+	{{- if eq .Unstaged true -}}  - {{- end -}}
+	{{- if eq .Untracked true -}} ? {{- end -}}
 	%f
 	{{- if and (eq .LastMessage "wip") (eq .Email .LastEmail) -}}
 		%F{red}!wip!%f
 	{{- end -}}
-	{{- if gt .Ahead 0 -}}  %F{red}↑ {{.Ahead}}%f      {{- end -}}
-	{{- if gt .Behind 0 -}} %F{magenta}↓ {{.Behind}}%f {{- end -}}
+	{{- if gt .Ahead 0 -}}  %F{red}⬆ {{.Ahead}}%f      {{- end -}}
+	{{- if gt .Behind 0 -}} %F{magenta}⬇ {{.Behind}}%f {{- end -}}
 	{{- if gt .BaseBehind 0 -}}
     %F{yellow}(.BaseBranch%f%F{red}-.BaseBehind%f%F{yellow})%f"
 	{{- end -}}
@@ -125,12 +125,12 @@ func main() {
     %F{red}%B⚠ %b%f
 	{{- end -}}
 	{{- if gt .StashCount 0 -}}
-    %F{yellow}⚑{{.StashCount}}%f
+    %F{yellow}♻ {{.StashCount}}%f
 	{{- end}} %F{blue}[{{.BaseName}}%f
 	{{- if ne .Subdir "."}}
 		%F{yellow}/{{.Subdir}}%f
 	{{- end -}}
-	{{- if ne .Branch "master" -}}
+	{{- if and (ne .Branch "master") (ne .Branch "") -}}
 		%F{green}:{{.Branch}}%f
 	{{- end -}}
 	%F{blue}]%f`,
@@ -191,11 +191,6 @@ func main() {
 	rep, err := git.PlainOpen(root)
 	assertError(err, "open a repository")
 
-	head, err := rep.Head()
-	assertError(err, "get HEAD ref")
-	stat.Branch = head.Name().Short()
-	stat.Revision = head.Hash().String()
-
 	staged := false
 	unstaged := false
 	untracked := false
@@ -245,100 +240,108 @@ func main() {
 	assertError(err, "open stash log")
 	stat.StashCount = stash
 
-	localConf, err := rep.Config()
-	assertError(err, "get local config")
-	remoteName := localConf.Raw.Section("branch").Subsection(head.Name().Short()).Option("remote")
-	remote := localConf.Remotes[remoteName]
-	var upstreamName plumbing.ReferenceName
-	var repoName string
-	if remote != nil {
-		for _, u := range remote.URLs {
-			if strings.HasPrefix(u, "https://github.com/") {
-				repoName = strings.TrimSuffix(strings.TrimPrefix(u, "https://github.com/"), ".git")
-			}
-		}
-		for _, f := range remote.Fetch {
-			if f.Match(head.Name()) {
-				upstreamName = f.Dst(head.Name())
-				break
-			}
-		}
-	}
+	stat.BaseName = filepath.Base(root)
 
-	if repoName == "" {
-		_, repoName = filepath.Split(root)
-	}
-	stat.BaseName = repoName
-
-	headCommit, err := rep.CommitObject(head.Hash())
-	assertError(err, "get a last commit")
-	stat.LastEmail = headCommit.Author.Email
-	stat.LastMessage = strings.TrimSpace(headCommit.Message)
-
-	upstream, err := rep.Reference(upstreamName, true)
-
-	if err == nil {
-		upstreamCommit, err := rep.CommitObject(upstream.Hash())
-		assertError(err, "get a last commit on upstream")
-
-		stat.Upstream = upstreamName.Short()
-		behinds, err := countCommit(rep, upstreamCommit, headCommit)
-		assertError(err, "traverse behind objects from upstream")
-		stat.Behind = behinds
-
-		aheads, err := countCommit(rep, headCommit, upstreamCommit)
-		assertError(err, "traverse ahead objects from upstream")
-		stat.Ahead = aheads
+	head, err := rep.Head()
+	if err != nil {
+		log.Print(err)
 	} else {
-		log.Printf("failed to get upstream: %s", err)
-	}
+		stat.Branch = head.Name().Short()
+		stat.Revision = head.Hash().String()
 
-	var baseBranchRef *plumbing.Reference
-	baseBranchName := "origin/master"
-	shortHead := head.Name().Short()
-	matchLength := 0
-	references, err := rep.References()
-	assertError(err, "fetch references")
-	defer references.Close()
-	assertError(references.ForEach(func(ref *plumbing.Reference) error {
-		name := ref.Name()
-		if !name.IsBranch() {
-			return nil
+		localConf, err := rep.Config()
+		assertError(err, "get local config")
+		remoteName := localConf.Raw.Section("branch").Subsection(head.Name().Short()).Option("remote")
+		remote := localConf.Remotes[remoteName]
+		var upstreamName plumbing.ReferenceName
+		var repoName string
+		if remote != nil {
+			for _, u := range remote.URLs {
+				if strings.HasPrefix(u, "https://github.com/") {
+					repoName = strings.TrimSuffix(strings.TrimPrefix(u, "https://github.com/"), ".git")
+				}
+			}
+			for _, f := range remote.Fetch {
+				if f.Match(head.Name()) {
+					upstreamName = f.Dst(head.Name())
+					break
+				}
+			}
 		}
-		short := name.Short()
-		last := short
-		if name.IsRemote() {
-			terms := strings.SplitN(short, "/", 2)
-			if len(terms) < 2 {
+		if repoName != "" {
+			stat.BaseName = repoName
+		}
+
+		headCommit, err := rep.CommitObject(head.Hash())
+		assertError(err, "get a last commit")
+		stat.LastEmail = headCommit.Author.Email
+		stat.LastMessage = strings.TrimSpace(headCommit.Message)
+
+		upstream, err := rep.Reference(upstreamName, true)
+
+		if err == nil {
+			upstreamCommit, err := rep.CommitObject(upstream.Hash())
+			assertError(err, "get a last commit on upstream")
+
+			stat.Upstream = upstreamName.Short()
+			behinds, err := countCommit(rep, upstreamCommit, headCommit)
+			assertError(err, "traverse behind objects from upstream")
+			stat.Behind = behinds
+
+			aheads, err := countCommit(rep, headCommit, upstreamCommit)
+			assertError(err, "traverse ahead objects from upstream")
+			stat.Ahead = aheads
+		} else {
+			log.Printf("failed to get upstream: %s", err)
+		}
+
+		var baseBranchRef *plumbing.Reference
+		baseBranchName := "origin/master"
+		shortHead := head.Name().Short()
+		matchLength := 0
+		references, err := rep.References()
+		assertError(err, "fetch references")
+		defer references.Close()
+		assertError(references.ForEach(func(ref *plumbing.Reference) error {
+			name := ref.Name()
+			if !name.IsBranch() {
 				return nil
 			}
-			last = terms[1]
-		}
-		if len(last) < matchLength {
+			short := name.Short()
+			last := short
+			if name.IsRemote() {
+				terms := strings.SplitN(short, "/", 2)
+				if len(terms) < 2 {
+					return nil
+				}
+				last = terms[1]
+			}
+			if len(last) < matchLength {
+				return nil
+			}
+			if strings.HasPrefix(shortHead, last+"-") {
+				matchLength = len(last)
+				baseBranchRef = ref
+				baseBranchName = short
+			}
 			return nil
-		}
-		if strings.HasPrefix(shortHead, last+"-") {
-			matchLength = len(last)
+		}), "traverse references")
+		stat.BaseBranch = baseBranchName
+
+		if baseBranchRef == nil {
+			ref, err := rep.Reference(plumbing.ReferenceName("refs/remotes/origin/master"), true)
+			assertError(err, "get origin/master ref")
 			baseBranchRef = ref
-			baseBranchName = short
 		}
-		return nil
-	}), "traverse references")
-	stat.BaseBranch = baseBranchName
 
-	if baseBranchRef == nil {
-		ref, err := rep.Reference(plumbing.ReferenceName("refs/remotes/origin/master"), true)
-		assertError(err, "get origin/master ref")
-		baseBranchRef = ref
+		baseBranchCommit, err := rep.CommitObject(baseBranchRef.Hash())
+		assertError(err, "get a last commit on base branch")
+
+		baseBehinds, err := countCommit(rep, baseBranchCommit, headCommit)
+		assertError(err, "traverse behind objects from base branch")
+		stat.BaseBehind = baseBehinds
+		// # (%a) action
 	}
-
-	baseBranchCommit, err := rep.CommitObject(baseBranchRef.Hash())
-	assertError(err, "get a last commit on base branch")
-
-	baseBehinds, err := countCommit(rep, baseBranchCommit, headCommit)
-	assertError(err, "traverse behind objects from base branch")
-	stat.BaseBehind = baseBehinds
-	// # (%a) action
 
 	{
 		buf, _ := json.Marshal(stat)
