@@ -3,7 +3,10 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
+	"flag"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"log/syslog"
@@ -13,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/kyoh86/xdg"
+	"github.com/wacul/ptr"
 	git "gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 	"gopkg.in/src-d/go-git.v4/plumbing/format/config"
@@ -25,8 +29,25 @@ func assertError(err error, doing string, args ...interface{}) {
 	}
 }
 
-func printVar(key string, format string, args ...interface{}) {
-	fmt.Println("git_stat[" + key + "]=" + fmt.Sprintf(format, args...))
+// Stat holds git statuses
+type Stat struct {
+	Base        string
+	Subdir      string
+	Branch      string
+	Revision    string
+	Staged      bool
+	Unstaged    bool
+	Untracked   bool
+	Email       string
+	StashCount  int
+	BaseName    string
+	LastEmail   string
+	LastMessage string
+	Upstream    string
+	Behind      int
+	Ahead       int
+	BaseBranch  string
+	BaseBehind  int
 }
 
 func countCommit(rep *git.Repository, toCommit *object.Commit, fromCommit *object.Commit) (int, error) {
@@ -86,6 +107,43 @@ func countCommit(rep *git.Repository, toCommit *object.Commit, fromCommit *objec
 }
 
 func main() {
+	templates := map[string]string{
+		"prompt": `%F{yellow}
+	{{- if .Staged    -}} + {{- end -}}
+	{{- if .Unstaged  -}} - {{- end -}}
+	{{- if .Untracked -}} ? {{- end -}}
+	%f
+	{{- if and (eq .LastMessage "wip") (eq .Email .LastEmail) -}}
+		%F{red}!wip!%f
+	{{- end -}}
+	{{- if gt .Ahead 0 -}}  %F{red}↑ {{.Ahead}}%f      {{- end -}}
+	{{- if gt .Behind 0 -}} %F{magenta}↓ {{.Behind}}%f {{- end -}}
+	{{- if gt .BaseBehind 0 -}}
+    %F{yellow}(.BaseBranch%f%F{red}-.BaseBehind%f%F{yellow})%f"
+	{{- end -}}
+	{{- if eq .Upstream "" -}}
+    %F{red}%B⚠ %b%f
+	{{- end -}}
+	{{- if gt .StashCount 0 -}}
+    %F{yellow}⚑{{.StashCount}}%f
+	{{- end}} %F{blue}[{{.BaseName}}%f
+	{{- if ne .Subdir "."}}
+		%F{yellow}/{{.Subdir}}%f
+	{{- end -}}
+	{{- if ne .Branch "master" -}}
+		%F{green}:{{.Branch}}%f
+	{{- end -}}
+	%F{blue}]%f`,
+	}
+
+	var format = flag.String("f", "", "format for stats")
+	var formatTmp = flag.String("t", "", "template of format for stats {prompt|status}")
+	flag.Parse()
+
+	if formatTmp != nil {
+		format = ptr.String(templates[*formatTmp])
+	}
+
 	logger, err := syslog.New(syslog.LOG_NOTICE|syslog.LOG_USER, "git-prompt")
 	if err != nil {
 		panic(err)
@@ -94,6 +152,13 @@ func main() {
 
 	wd, err := os.Getwd()
 	assertError(err, "get working directory")
+
+	tmp, err := template.New("stat").Parse(*format)
+	assertError(err, "parse format template")
+
+	log.Print(*format)
+
+	var stat Stat
 
 	var needle = wd
 	var root string
@@ -117,19 +182,19 @@ func main() {
 		root = needle
 		break
 	}
-	printVar("base", "%q", root)
+	stat.Base = root
 
 	subdir, err := filepath.Rel(root, wd)
 	assertError(err, "get rel path from root")
-	printVar("subdir", "%q", subdir)
+	stat.Subdir = subdir
 
 	rep, err := git.PlainOpen(root)
 	assertError(err, "open a repository")
 
 	head, err := rep.Head()
 	assertError(err, "get HEAD ref")
-	printVar("branch", "%q", head.Name().Short())
-	printVar("revision", "%q", head.Hash().String())
+	stat.Branch = head.Name().Short()
+	stat.Revision = head.Hash().String()
 
 	staged := false
 	unstaged := false
@@ -150,9 +215,9 @@ func main() {
 			unstaged = true
 		}
 	}
-	printVar("staged", "%t", staged)
-	printVar("unstaged", "%t", unstaged)
-	printVar("untracked", "%t", untracked)
+	stat.Staged = staged
+	stat.Unstaged = unstaged
+	stat.Untracked = untracked
 
 	// see https://git-scm.com/docs/git-config#FILES
 	confPaths := []string{
@@ -174,11 +239,11 @@ func main() {
 			assertError(dec.Decode(&conf), "decode config %q", path)
 		}()
 	}
-	printVar("email", "%q", conf.Section("user").Option("email"))
+	stat.Email = conf.Section("user").Option("email")
 
 	stash, err := stashCount(root)
 	assertError(err, "open stash log")
-	printVar("stash_count", "%d", stash)
+	stat.StashCount = stash
 
 	localConf, err := rep.Config()
 	assertError(err, "get local config")
@@ -203,12 +268,12 @@ func main() {
 	if repoName == "" {
 		_, repoName = filepath.Split(root)
 	}
-	printVar("base_name", "%q", repoName)
+	stat.BaseName = repoName
 
 	headCommit, err := rep.CommitObject(head.Hash())
 	assertError(err, "get a last commit")
-	printVar("last_email", "%q", headCommit.Author.Email)
-	printVar("last_message", "%q", strings.TrimSpace(headCommit.Message))
+	stat.LastEmail = headCommit.Author.Email
+	stat.LastMessage = strings.TrimSpace(headCommit.Message)
 
 	upstream, err := rep.Reference(upstreamName, true)
 
@@ -216,14 +281,14 @@ func main() {
 		upstreamCommit, err := rep.CommitObject(upstream.Hash())
 		assertError(err, "get a last commit on upstream")
 
-		printVar("upstream", "%q", upstreamName.Short())
+		stat.Upstream = upstreamName.Short()
 		behinds, err := countCommit(rep, upstreamCommit, headCommit)
 		assertError(err, "traverse behind objects from upstream")
-		printVar("behind", "%d", behinds)
+		stat.Behind = behinds
 
 		aheads, err := countCommit(rep, headCommit, upstreamCommit)
 		assertError(err, "traverse ahead objects from upstream")
-		printVar("ahead", "%d", aheads)
+		stat.Ahead = aheads
 	} else {
 		log.Printf("failed to get upstream: %s", err)
 	}
@@ -259,7 +324,7 @@ func main() {
 		}
 		return nil
 	}), "traverse references")
-	printVar("base_branch", "%q", baseBranchName)
+	stat.BaseBranch = baseBranchName
 
 	if baseBranchRef == nil {
 		ref, err := rep.Reference(plumbing.ReferenceName("refs/remotes/origin/master"), true)
@@ -272,8 +337,14 @@ func main() {
 
 	baseBehinds, err := countCommit(rep, baseBranchCommit, headCommit)
 	assertError(err, "traverse behind objects from base branch")
-	printVar("base_behind", "%d", baseBehinds)
+	stat.BaseBehind = baseBehinds
 	// # (%a) action
+
+	{
+		buf, _ := json.Marshal(stat)
+		log.Print(string(buf))
+	}
+	assertError(tmp.Execute(os.Stdout, stat), "output stats")
 }
 
 func stashCount(dir string) (int, error) {
