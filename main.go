@@ -119,9 +119,6 @@ func main() {
 			{{- if gt .BaseBehind 0 -}}
 				%F{yellow}(.BaseBranch%f%F{red}-.BaseBehind%f%F{yellow})%f"
 			{{- end -}}
-			{{- if eq .Upstream "" -}}
-				%F{red}%B⚠ %b%f
-			{{- end -}}
 			{{- if gt .StashCount 0 -}}
 				%F{yellow}♻ {{.StashCount}}%f
 			{{- end}} %F{blue}[{{.BaseName}}%f
@@ -130,6 +127,9 @@ func main() {
 			{{- end -}}
 			{{- if and (ne .Branch "master") (ne .Branch "") -}}
 				%F{green}:{{.Branch}}%f
+			{{- end -}}
+			{{- if eq .Upstream "" -}}
+				%F{red}⚑%f
 			{{- end -}}
 			%F{blue}]%f`,
 
@@ -145,9 +145,6 @@ func main() {
 			{{- if gt .BaseBehind 0 -}}
 			#[fg=yellow](.BaseBranch#[fg=red]-.BaseBehind#[fg=yellow])"
 			{{- end -}}
-			{{- if eq .Upstream "" -}}
-			#[fg=red]%B⚠ %b
-			{{- end -}}
 			{{- if gt .StashCount 0 -}}
 			#[fg=yellow]♻ {{.StashCount}}
 			{{- end}} #[fg=blue][{{.BaseName}}
@@ -157,6 +154,7 @@ func main() {
 			{{- if and (ne .Branch "master") (ne .Branch "") -}}
 			#[fg=green]:{{.Branch}}
 			{{- end -}}
+			{{- if eq .Upstream "" -}}#[fg=red]⚑{{end -}}
 			#[fg=blue]]#[fg=default]`,
 	}
 
