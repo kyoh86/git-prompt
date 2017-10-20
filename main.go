@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"flag"
 	"fmt"
 	"html/template"
 	"io"
@@ -15,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/kyoh86/xdg"
-	"github.com/wacul/ptr"
+	kingpin "gopkg.in/alecthomas/kingpin.v2"
 	git "gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 	"gopkg.in/src-d/go-git.v4/plumbing/format/config"
@@ -106,8 +105,8 @@ func countCommit(rep *git.Repository, toCommit *object.Commit, fromCommit *objec
 }
 
 func main() {
-	templates := map[string]string{
-		"prompt": `%F{yellow}
+	styles := map[string]string{
+		"zsh": `%F{yellow}
 			{{- if eq .Staged true -}}    + {{- end -}}
 			{{- if eq .Unstaged true -}}  - {{- end -}}
 			{{- if eq .Untracked true -}} ? {{- end -}}
@@ -134,7 +133,7 @@ func main() {
 			{{- end -}}
 			%F{blue}]%f`,
 
-		"status": `#[bg=black]#[fg=yellow]
+		"tmux": `#[bg=black]#[fg=yellow]
 			{{- if eq .Staged true -}}    + {{- end -}}
 			{{- if eq .Unstaged true -}}  - {{- end -}}
 			{{- if eq .Untracked true -}} ? {{- end -}}
@@ -161,20 +160,18 @@ func main() {
 			#[fg=blue]]#[fg=default]`,
 	}
 
-	var dir = flag.String("C", "", "working directory")
-	var format = flag.String("f", "", "format for stats")
-	var formatTmp = flag.String("t", "", "template of format for stats {prompt|status}")
-	flag.Parse()
-
-	if formatTmp != nil {
-		format = ptr.String(templates[*formatTmp])
-	}
-
 	logger, err := syslog.New(syslog.LOG_NOTICE|syslog.LOG_USER, "git-prompt")
 	if err != nil {
 		panic(err)
 	}
 	log.SetOutput(logger)
+
+	app := kingpin.New("git-prompt", "generate prompt strings")
+	var dir = app.Flag("working-directory", "working directory").Short('C').String()
+	var style = app.Flag("style", "output style").Short('s').String()
+	if _, err := app.Parse(os.Args[1:]); err != nil {
+		assertError(err, "parse arguments")
+	}
 
 	if dir == nil || *dir == "" {
 		wd, err := os.Getwd()
@@ -182,10 +179,20 @@ func main() {
 		dir = &wd
 	}
 
-	tmp, err := template.New("stat").Parse(*format)
-	assertError(err, "parse format template")
+	var format string
+	if style != nil {
+		switch {
+		case strings.HasPrefix(*style, "format:"):
+			format = strings.TrimPrefix(*style, "format:")
+		case strings.HasPrefix(*style, "f:"):
+			format = strings.TrimPrefix(*style, "f:")
+		default:
+			format = styles[*style]
+		}
+	}
 
-	// log.Print(*format)
+	tmp, err := template.New("stat").Parse(format)
+	assertError(err, "parse format template")
 
 	var stat Stat
 
@@ -372,10 +379,6 @@ func main() {
 		// # (%a) action
 	}
 
-	// {
-	// 	buf, _ := json.Marshal(stat)
-	// 	log.Print(string(buf))
-	// }
 	assertError(tmp.Execute(os.Stdout, stat), "output stats")
 }
 
