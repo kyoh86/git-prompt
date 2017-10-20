@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
@@ -109,33 +108,60 @@ func countCommit(rep *git.Repository, toCommit *object.Commit, fromCommit *objec
 func main() {
 	templates := map[string]string{
 		"prompt": `%F{yellow}
-	{{- if eq .Staged true -}}    + {{- end -}}
-	{{- if eq .Unstaged true -}}  - {{- end -}}
-	{{- if eq .Untracked true -}} ? {{- end -}}
-	%f
-	{{- if and (eq .LastMessage "wip") (eq .Email .LastEmail) -}}
-		%F{red}!wip!%f
-	{{- end -}}
-	{{- if gt .Ahead 0 -}}  %F{red}⬆ {{.Ahead}}%f      {{- end -}}
-	{{- if gt .Behind 0 -}} %F{magenta}⬇ {{.Behind}}%f {{- end -}}
-	{{- if gt .BaseBehind 0 -}}
-    %F{yellow}(.BaseBranch%f%F{red}-.BaseBehind%f%F{yellow})%f"
-	{{- end -}}
-	{{- if eq .Upstream "" -}}
-    %F{red}%B⚠ %b%f
-	{{- end -}}
-	{{- if gt .StashCount 0 -}}
-    %F{yellow}♻ {{.StashCount}}%f
-	{{- end}} %F{blue}[{{.BaseName}}%f
-	{{- if ne .Subdir "."}}
-		%F{yellow}/{{.Subdir}}%f
-	{{- end -}}
-	{{- if and (ne .Branch "master") (ne .Branch "") -}}
-		%F{green}:{{.Branch}}%f
-	{{- end -}}
-	%F{blue}]%f`,
+			{{- if eq .Staged true -}}    + {{- end -}}
+			{{- if eq .Unstaged true -}}  - {{- end -}}
+			{{- if eq .Untracked true -}} ? {{- end -}}
+			%f
+			{{- if and (eq .LastMessage "wip") (eq .Email .LastEmail) -}}
+				%F{red}!wip!%f
+			{{- end -}}
+			{{- if gt .Ahead 0 -}}  %F{red}⬆ {{.Ahead}}%f      {{- end -}}
+			{{- if gt .Behind 0 -}} %F{magenta}⬇ {{.Behind}}%f {{- end -}}
+			{{- if gt .BaseBehind 0 -}}
+				%F{yellow}(.BaseBranch%f%F{red}-.BaseBehind%f%F{yellow})%f"
+			{{- end -}}
+			{{- if eq .Upstream "" -}}
+				%F{red}%B⚠ %b%f
+			{{- end -}}
+			{{- if gt .StashCount 0 -}}
+				%F{yellow}♻ {{.StashCount}}%f
+			{{- end}} %F{blue}[{{.BaseName}}%f
+			{{- if ne .Subdir "."}}
+				%F{yellow}/{{.Subdir}}%f
+			{{- end -}}
+			{{- if and (ne .Branch "master") (ne .Branch "") -}}
+				%F{green}:{{.Branch}}%f
+			{{- end -}}
+			%F{blue}]%f`,
+
+		"status": `#[bg=black]#[fg=yellow]
+			{{- if eq .Staged true -}}    + {{- end -}}
+			{{- if eq .Unstaged true -}}  - {{- end -}}
+			{{- if eq .Untracked true -}} ? {{- end -}}
+			{{- if and (eq .LastMessage "wip") (eq .Email .LastEmail) -}}
+			#[fg=red]!wip!
+			{{- end -}}
+			{{- if gt .Ahead 0 -}}  #[fg=red]⬆ {{.Ahead}}      {{- end -}}
+			{{- if gt .Behind 0 -}} #[fg=magenta]⬇ {{.Behind}} {{- end -}}
+			{{- if gt .BaseBehind 0 -}}
+			#[fg=yellow](.BaseBranch#[fg=red]-.BaseBehind#[fg=yellow])"
+			{{- end -}}
+			{{- if eq .Upstream "" -}}
+			#[fg=red]%B⚠ %b
+			{{- end -}}
+			{{- if gt .StashCount 0 -}}
+			#[fg=yellow]♻ {{.StashCount}}
+			{{- end}} #[fg=blue][{{.BaseName}}
+			{{- if ne .Subdir "."}}
+			#[fg=yellow]/{{.Subdir}}
+			{{- end -}}
+			{{- if and (ne .Branch "master") (ne .Branch "") -}}
+			#[fg=green]:{{.Branch}}
+			{{- end -}}
+			#[fg=blue]]#[fg=default]`,
 	}
 
+	var dir = flag.String("C", "", "working directory")
 	var format = flag.String("f", "", "format for stats")
 	var formatTmp = flag.String("t", "", "template of format for stats {prompt|status}")
 	flag.Parse()
@@ -150,17 +176,20 @@ func main() {
 	}
 	log.SetOutput(logger)
 
-	wd, err := os.Getwd()
-	assertError(err, "get working directory")
+	if dir == nil || *dir == "" {
+		wd, err := os.Getwd()
+		assertError(err, "get working directory")
+		dir = &wd
+	}
 
 	tmp, err := template.New("stat").Parse(*format)
 	assertError(err, "parse format template")
 
-	log.Print(*format)
+	// log.Print(*format)
 
 	var stat Stat
 
-	var needle = wd
+	var needle = *dir
 	var root string
 	for {
 		parent, name := filepath.Split(needle)
@@ -184,7 +213,7 @@ func main() {
 	}
 	stat.Base = root
 
-	subdir, err := filepath.Rel(root, wd)
+	subdir, err := filepath.Rel(root, *dir)
 	assertError(err, "get rel path from root")
 	stat.Subdir = subdir
 
@@ -194,7 +223,7 @@ func main() {
 	staged := false
 	unstaged := false
 	untracked := false
-	statuses := scan(runGit("status", "--porcelain"))
+	statuses := scan(runGit("-C", *dir, "status", "--porcelain"))
 	for statuses.Scan() {
 		line := []rune(statuses.Text())
 		if len(line) < 2 {
@@ -343,10 +372,10 @@ func main() {
 		// # (%a) action
 	}
 
-	{
-		buf, _ := json.Marshal(stat)
-		log.Print(string(buf))
-	}
+	// {
+	// 	buf, _ := json.Marshal(stat)
+	// 	log.Print(string(buf))
+	// }
 	assertError(tmp.Execute(os.Stdout, stat), "output stats")
 }
 
