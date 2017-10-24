@@ -118,7 +118,7 @@ func main() {
 			{{- if gt .Ahead 0 -}}  %F{red}⬆ {{.Ahead}}%f      {{- end -}}
 			{{- if gt .Behind 0 -}} %F{magenta}⬇ {{.Behind}}%f {{- end -}}
 			{{- if gt .BaseBehind 0 -}}
-				%F{yellow}({{.BaseBranch}}%f%F{red}-{{.BaseBehind}}%f%F{yellow})%f"
+				%F{yellow}({{.BaseBranch}}%f%F{red}-{{.BaseBehind}}%f%F{yellow})%f
 			{{- end -}}
 			{{- if gt .StashCount 0 -}}
 				%F{yellow}♻ {{.StashCount}}%f
@@ -144,7 +144,7 @@ func main() {
 			{{- if gt .Ahead 0 -}}  #[fg=red]⬆ {{.Ahead}}      {{- end -}}
 			{{- if gt .Behind 0 -}} #[fg=magenta]⬇ {{.Behind}} {{- end -}}
 			{{- if gt .BaseBehind 0 -}}
-			#[fg=yellow]({{.BaseBranch}}#[fg=red]-{{.BaseBehind}}#[fg=yellow])"
+			#[fg=yellow]({{.BaseBranch}}#[fg=red]-{{.BaseBehind}}#[fg=yellow])
 			{{- end -}}
 			{{- if gt .StashCount 0 -}}
 			#[fg=yellow]♻ {{.StashCount}}
