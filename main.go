@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"encoding/json"
 
 	"github.com/kyoh86/xdg"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
@@ -117,7 +118,7 @@ func main() {
 			{{- if gt .Ahead 0 -}}  %F{red}⬆ {{.Ahead}}%f      {{- end -}}
 			{{- if gt .Behind 0 -}} %F{magenta}⬇ {{.Behind}}%f {{- end -}}
 			{{- if gt .BaseBehind 0 -}}
-				%F{yellow}(.BaseBranch%f%F{red}-.BaseBehind%f%F{yellow})%f"
+				%F{yellow}({{.BaseBranch}}%f%F{red}-{{.BaseBehind}}%f%F{yellow})%f"
 			{{- end -}}
 			{{- if gt .StashCount 0 -}}
 				%F{yellow}♻ {{.StashCount}}%f
@@ -143,7 +144,7 @@ func main() {
 			{{- if gt .Ahead 0 -}}  #[fg=red]⬆ {{.Ahead}}      {{- end -}}
 			{{- if gt .Behind 0 -}} #[fg=magenta]⬇ {{.Behind}} {{- end -}}
 			{{- if gt .BaseBehind 0 -}}
-			#[fg=yellow](.BaseBranch#[fg=red]-.BaseBehind#[fg=yellow])"
+			#[fg=yellow]({{.BaseBranch}}#[fg=red]-{{.BaseBehind}}#[fg=yellow])"
 			{{- end -}}
 			{{- if gt .StashCount 0 -}}
 			#[fg=yellow]♻ {{.StashCount}}
@@ -178,12 +179,16 @@ func main() {
 	}
 
 	var format string
+	var pretty bool
 	if style != nil {
 		switch {
 		case strings.HasPrefix(*style, "format:"):
 			format = strings.TrimPrefix(*style, "format:")
 		case strings.HasPrefix(*style, "f:"):
 			format = strings.TrimPrefix(*style, "f:")
+		case *style == "pretty":
+			format = ""
+			pretty = true
 		default:
 			format = styles[*style]
 		}
@@ -375,6 +380,12 @@ func main() {
 		assertError(err, "traverse behind objects from base branch")
 		stat.BaseBehind = baseBehinds
 		// # (%a) action
+	}
+
+	if pretty {
+		writer := json.NewEncoder(os.Stdout)
+		writer.SetIndent("", "  ")
+		assertError(writer.Encode(stat), "output pretty")
 	}
 
 	assertError(tmp.Execute(os.Stdout, stat), "output stats")
