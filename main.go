@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -12,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"encoding/json"
 
 	"github.com/kyoh86/xdg"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
@@ -149,7 +149,7 @@ func main() {
 			{{- if gt .StashCount 0 -}}
 			#[fg=yellow]♻ {{.StashCount}}
 			{{- end}} #[fg=blue][{{.BaseName}}
-			{{- if ne .Subdir "."}}
+			{{- if ne .Subdir "." -}}
 			#[fg=yellow]/{{.Subdir}}
 			{{- end -}}
 			{{- if and (ne .Branch "master") (ne .Branch "") -}}
@@ -159,11 +159,13 @@ func main() {
 			#[fg=blue]]#[fg=default]`,
 	}
 
-	logger, err := syslog.New(syslog.LOG_NOTICE|syslog.LOG_USER, "git-prompt")
-	if err != nil {
-		panic(err)
+	{
+		logger, err := syslog.New(syslog.LOG_NOTICE|syslog.LOG_USER, "git-prompt")
+		if err != nil {
+			panic(err)
+		}
+		log.SetOutput(logger)
 	}
-	log.SetOutput(logger)
 
 	app := kingpin.New("git-prompt", "generate prompt strings")
 	var dir = app.Flag("working-directory", "working directory").Short('C').String()
@@ -194,8 +196,8 @@ func main() {
 		}
 	}
 
-	tmp, err := template.New("stat").Parse(format)
-	assertError(err, "parse format template")
+	tmp, tmpErr := template.New("stat").Parse(format)
+	assertError(tmpErr, "parse format template")
 
 	var stat Stat
 
@@ -223,9 +225,11 @@ func main() {
 	}
 	stat.Base = root
 
-	subdir, err := filepath.Rel(root, *dir)
-	assertError(err, "get rel path from root")
-	stat.Subdir = subdir
+	{
+		subdir, err := filepath.Rel(root, *dir)
+		assertError(err, "get rel path from root")
+		stat.Subdir = subdir
+	}
 
 	rep, err := git.PlainOpen(root)
 	assertError(err, "open a repository")
