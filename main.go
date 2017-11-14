@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -14,17 +15,21 @@ import (
 	"path/filepath"
 	"strings"
 
+	flags "github.com/jessevdk/go-flags"
 	"github.com/kyoh86/xdg"
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
+	"github.com/wacul/ulog"
+	"github.com/wacul/ulog/adapter/stdlog"
 	git "gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 	"gopkg.in/src-d/go-git.v4/plumbing/format/config"
 	"gopkg.in/src-d/go-git.v4/plumbing/object"
 )
 
-func assertError(err error, doing string, args ...interface{}) {
+func assertError(ctx context.Context, err error, doing string, args ...interface{}) {
 	if err != nil {
-		log.Fatalf("failed to %s: %s", fmt.Sprintf(doing, args...), err.Error())
+		logger := ulog.Logger(ctx)
+		logger.WithField("error", err).Error("failed to " + fmt.Sprintf(doing, args...))
+		panic(err)
 	}
 }
 
@@ -159,49 +164,66 @@ func main() {
 			#[fg=blue]]#[fg=default]`,
 	}
 
-	{
-		logger, err := syslog.New(syslog.LOG_NOTICE|syslog.LOG_USER, "git-prompt")
+	var option struct {
+		Dir     string `long:"dir" short:"C" description:"working directory"`
+		Style   string `long:"style" short:"s" description:"output style" default:"pretty"`
+		Verbose []bool `long:"verbose" short:"v" description:"log verbose"`
+	}
+
+	ctx := context.Background()
+	logger := ulog.Logger(ctx)
+
+	if _, err := flags.ParseArgs(&option, os.Args[1:]); err != nil {
+		panic(err)
+	}
+
+	var level ulog.Level
+	switch len(option.Verbose) {
+	case 0:
+		l, err := syslog.New(syslog.LOG_NOTICE|syslog.LOG_USER, "git-prompt")
 		if err != nil {
 			panic(err)
 		}
-		log.SetOutput(logger)
+
+		level = ulog.WarnLevel
+		log.SetOutput(l)
+	case 1:
+		level = ulog.InfoLevel
+		log.SetOutput(os.Stderr)
+	default:
+		level = ulog.DebugLevel
+		log.SetOutput(os.Stderr)
 	}
 
-	app := kingpin.New("git-prompt", "generate prompt strings")
-	var dir = app.Flag("working-directory", "working directory").Short('C').String()
-	var style = app.Flag("style", "output style").Short('s').String()
-	if _, err := app.Parse(os.Args[1:]); err != nil {
-		assertError(err, "parse arguments")
-	}
+	logger = logger.WithAdapter(&stdlog.Adapter{Level: level})
+	ctx = logger
 
-	if dir == nil || *dir == "" {
+	if option.Dir == "" {
 		wd, err := os.Getwd()
-		assertError(err, "get working directory")
-		dir = &wd
+		assertError(ctx, err, "get working directory")
+		option.Dir = wd
 	}
 
 	var format string
 	var pretty bool
-	if style != nil {
-		switch {
-		case strings.HasPrefix(*style, "format:"):
-			format = strings.TrimPrefix(*style, "format:")
-		case strings.HasPrefix(*style, "f:"):
-			format = strings.TrimPrefix(*style, "f:")
-		case *style == "pretty":
-			format = ""
-			pretty = true
-		default:
-			format = styles[*style]
-		}
+	switch {
+	case strings.HasPrefix(option.Style, "format:"):
+		format = strings.TrimPrefix(option.Style, "format:")
+	case strings.HasPrefix(option.Style, "f:"):
+		format = strings.TrimPrefix(option.Style, "f:")
+	case option.Style == "pretty":
+		format = ""
+		pretty = true
+	default:
+		format = styles[option.Style]
 	}
 
 	tmp, tmpErr := template.New("stat").Parse(format)
-	assertError(tmpErr, "parse format template")
+	assertError(ctx, tmpErr, "parse format template")
 
 	var stat Stat
 
-	var needle = *dir
+	var needle = option.Dir
 	var root string
 	for {
 		parent, name := filepath.Split(needle)
@@ -219,25 +241,25 @@ func main() {
 			needle = parent
 			continue
 		}
-		assertError(err, "stat current directory")
+		assertError(ctx, err, "stat current directory")
 		root = needle
 		break
 	}
 	stat.Base = root
 
 	{
-		subdir, err := filepath.Rel(root, *dir)
-		assertError(err, "get rel path from root")
+		subdir, err := filepath.Rel(root, option.Dir)
+		assertError(ctx, err, "get rel path from root")
 		stat.Subdir = subdir
 	}
 
 	rep, err := git.PlainOpen(root)
-	assertError(err, "open a repository")
+	assertError(ctx, err, "open a repository")
 
 	staged := false
 	unstaged := false
 	untracked := false
-	statuses := scan(runGit("-C", *dir, "status", "--porcelain"))
+	statuses := scan(runGit(ctx, "-C", option.Dir, "status", "--porcelain"))
 	for statuses.Scan() {
 		line := []rune(statuses.Text())
 		if len(line) < 2 {
@@ -271,29 +293,32 @@ func main() {
 			if os.IsNotExist(err) {
 				return
 			}
-			assertError(err, "load config")
+			assertError(ctx, err, "load config")
 			defer file.Close()
 			dec := config.NewDecoder(file)
-			assertError(dec.Decode(&conf), "decode config %q", path)
+			assertError(ctx, dec.Decode(&conf), "decode config %q", path)
 		}()
 	}
 	stat.Email = conf.Section("user").Option("email")
 
 	stash, err := stashCount(root)
-	assertError(err, "open stash log")
+	assertError(ctx, err, "open stash log")
 	stat.StashCount = stash
 
 	stat.BaseName = filepath.Base(root)
 
 	head, err := rep.Head()
 	if err != nil {
-		log.Print(err)
+		logger.Warn(err)
 	} else {
 		stat.Branch = head.Name().Short()
 		stat.Revision = head.Hash().String()
+		if stat.Branch == "HEAD" {
+			stat.Branch = string(([]rune(stat.Revision))[:6]) + "..."
+		}
 
 		localConf, err := rep.Config()
-		assertError(err, "get local config")
+		assertError(ctx, err, "get local config")
 		remoteName := localConf.Raw.Section("branch").Subsection(head.Name().Short()).Option("remote")
 		remote := localConf.Remotes[remoteName]
 		var upstreamName plumbing.ReferenceName
@@ -316,7 +341,7 @@ func main() {
 		}
 
 		headCommit, err := rep.CommitObject(head.Hash())
-		assertError(err, "get a last commit")
+		assertError(ctx, err, "get a last commit")
 		stat.LastEmail = headCommit.Author.Email
 		stat.LastMessage = strings.TrimSpace(headCommit.Message)
 
@@ -324,18 +349,18 @@ func main() {
 
 		if err == nil {
 			upstreamCommit, err := rep.CommitObject(upstream.Hash())
-			assertError(err, "get a last commit on upstream")
+			assertError(ctx, err, "get a last commit on upstream")
 
 			stat.Upstream = upstreamName.Short()
 			behinds, err := countCommit(rep, upstreamCommit, headCommit)
-			assertError(err, "traverse behind objects from upstream")
+			assertError(ctx, err, "traverse behind objects from upstream")
 			stat.Behind = behinds
 
 			aheads, err := countCommit(rep, headCommit, upstreamCommit)
-			assertError(err, "traverse ahead objects from upstream")
+			assertError(ctx, err, "traverse ahead objects from upstream")
 			stat.Ahead = aheads
 		} else {
-			log.Printf("failed to get upstream: %s", err)
+			logger.WithField("error", err).Warn("failed to get upstream")
 		}
 
 		var baseBranchRef *plumbing.Reference
@@ -343,9 +368,9 @@ func main() {
 		shortHead := head.Name().Short()
 		matchLength := 0
 		references, err := rep.References()
-		assertError(err, "fetch references")
+		assertError(ctx, err, "fetch references")
 		defer references.Close()
-		assertError(references.ForEach(func(ref *plumbing.Reference) error {
+		assertError(ctx, references.ForEach(func(ref *plumbing.Reference) error {
 			name := ref.Name()
 			if !name.IsBranch() {
 				return nil
@@ -373,15 +398,15 @@ func main() {
 
 		if baseBranchRef == nil {
 			ref, err := rep.Reference(plumbing.ReferenceName("refs/remotes/origin/master"), true)
-			assertError(err, "get origin/master ref")
+			assertError(ctx, err, "get origin/master ref")
 			baseBranchRef = ref
 		}
 
 		baseBranchCommit, err := rep.CommitObject(baseBranchRef.Hash())
-		assertError(err, "get a last commit on base branch")
+		assertError(ctx, err, "get a last commit on base branch")
 
 		baseBehinds, err := countCommit(rep, baseBranchCommit, headCommit)
-		assertError(err, "traverse behind objects from base branch")
+		assertError(ctx, err, "traverse behind objects from base branch")
 		stat.BaseBehind = baseBehinds
 		// # (%a) action
 	}
@@ -389,10 +414,10 @@ func main() {
 	if pretty {
 		writer := json.NewEncoder(os.Stdout)
 		writer.SetIndent("", "  ")
-		assertError(writer.Encode(stat), "output pretty")
+		assertError(ctx, writer.Encode(stat), "output pretty")
 	}
 
-	assertError(tmp.Execute(os.Stdout, stat), "output stats")
+	assertError(ctx, tmp.Execute(os.Stdout, stat), "output stats")
 }
 
 func stashCount(dir string) (int, error) {
@@ -426,10 +451,10 @@ func lineCounter(r io.Reader) (int, error) {
 	}
 }
 
-func runGit(args ...string) []byte {
+func runGit(ctx context.Context, args ...string) []byte {
 	command := exec.Command("git", args...)
 	output, err := command.Output()
-	assertError(err, "run git")
+	assertError(ctx, err, "run git")
 	if output == nil {
 		return []byte{}
 	}
