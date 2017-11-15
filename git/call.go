@@ -104,16 +104,19 @@ func (g *Git) CurrentBranch() (string, error) {
 
 // Upstream will get the upstream of a current branch
 func (g *Git) Upstream() (string, error) {
-	return str(g.Call("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"))
+	return strOrEmpty(g.Call("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"))
 }
 
 // Remote will get the remote of a branch
 func (g *Git) Remote(branch string) (string, error) {
-	return str(g.Call("config", "--local", "--get", "branch."+branch+".remote"))
+	return strOrEmpty(g.Call("config", "--local", "--get", "branch."+branch+".remote"))
 }
 
 // RemoteURL will get the url of a remote
 func (g *Git) RemoteURL(remote string) (string, error) {
+	if remote == "" {
+		return "", nil
+	}
 	return str(g.Call("remote", "get-url", remote))
 }
 
@@ -178,7 +181,7 @@ func (g *Git) StashCount() (int, error) {
 
 // DiffCount counts rev-list between branches
 func (g *Git) DiffCount(baseBranch, headBranch string) (int, error) {
-	return count(g.Call("rev-list", baseBranch+".."+headBranch))
+	return countOrZero(g.Call("rev-list", baseBranch+".."+headBranch))
 }
 
 // AheadCount counts rev-list from upstream
