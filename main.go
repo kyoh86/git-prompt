@@ -1,17 +1,13 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"io"
 	"log"
 	"log/syslog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -19,10 +15,9 @@ import (
 	"github.com/kyoh86/xdg"
 	"github.com/wacul/ulog"
 	"github.com/wacul/ulog/adapter/stdlog"
-	git "gopkg.in/src-d/go-git.v4"
-	"gopkg.in/src-d/go-git.v4/plumbing"
+
+	rungit "github.com/kyoh86/git-prompt/git"
 	"gopkg.in/src-d/go-git.v4/plumbing/format/config"
-	"gopkg.in/src-d/go-git.v4/plumbing/object"
 )
 
 func assertError(ctx context.Context, err error, doing string, args ...interface{}) {
@@ -31,6 +26,12 @@ func assertError(ctx context.Context, err error, doing string, args ...interface
 		logger.WithField("error", err).Error("failed to " + fmt.Sprintf(doing, args...))
 		panic(err)
 	}
+}
+
+func assertSetBool(ctx context.Context, getter func() (bool, error), result *bool, doing string, args ...interface{}) {
+	flag, err := getter()
+	assertError(ctx, err, doing, args...)
+	*result = flag
 }
 
 // Stat holds git statuses
@@ -52,62 +53,6 @@ type Stat struct {
 	Ahead       int
 	BaseBranch  string
 	BaseBehind  int
-}
-
-func countCommit(rep *git.Repository, toCommit *object.Commit, fromCommit *object.Commit) (int, error) {
-	toMap := map[plumbing.Hash]struct{}{
-		toCommit.Hash: struct{}{},
-	}
-	toArr := []plumbing.Hash{}
-
-	fromMap := map[plumbing.Hash]struct{}{
-		fromCommit.Hash: struct{}{},
-	}
-
-	toIter := object.NewCommitPreorderIter(toCommit, nil)
-	fromIter := object.NewCommitPreorderIter(fromCommit, nil)
-	var commonCommit *plumbing.Hash
-	for {
-		remain := false
-		toNext, err := toIter.Next()
-		if err != nil && err != io.EOF {
-			return 0, err
-		}
-		if toNext != nil {
-			remain = true
-			toMap[toNext.Hash] = struct{}{}
-			if _, ok := fromMap[toNext.Hash]; ok {
-				commonCommit = &toNext.Hash
-				break
-			}
-			toArr = append(toArr, toNext.Hash)
-		}
-
-		fromNext, err := fromIter.Next()
-		if err != nil && err != io.EOF {
-			return 0, err
-		}
-		if fromNext != nil {
-			remain = true
-			fromMap[fromNext.Hash] = struct{}{}
-			if _, ok := toMap[fromNext.Hash]; ok {
-				commonCommit = &fromNext.Hash
-				break
-			}
-		}
-		if !remain {
-			break
-		}
-	}
-	if commonCommit == nil {
-		return len(toArr), nil
-	}
-	for i, h := range toArr {
-		if h == *commonCommit {
-			return i, nil
-		}
-	}
-	return len(toArr), nil
 }
 
 func main() {
@@ -223,68 +168,26 @@ func main() {
 
 	var stat Stat
 
-	var needle = option.Dir
-	var root string
-	for {
-		parent, name := filepath.Split(needle)
-		if parent == needle {
-			break
-		}
-		parent = strings.TrimRight(parent, string([]rune{filepath.Separator}))
-		if name == ".git" {
-			root = parent
-			break
-		}
-
-		_, err := os.Stat(filepath.Join(needle, ".git"))
-		if os.IsNotExist(err) {
-			needle = parent
-			continue
-		}
-		assertError(ctx, err, "stat current directory")
-		root = needle
-		break
-	}
-	stat.Base = root
+	repo, repoErr := rungit.OpenDir(option.Dir)
+	assertError(ctx, repoErr, "open a repository")
+	stat.Base = repo.Root()
 
 	{
-		subdir, err := filepath.Rel(root, option.Dir)
+		subdir, err := filepath.Rel(stat.Base, option.Dir)
 		assertError(ctx, err, "get rel path from root")
 		stat.Subdir = subdir
 	}
 
-	rep, err := git.PlainOpen(root)
-	assertError(ctx, err, "open a repository")
-
-	staged := false
-	unstaged := false
-	untracked := false
-	statuses := scan(runGit(ctx, "-C", option.Dir, "status", "--porcelain"))
-	for statuses.Scan() {
-		line := []rune(statuses.Text())
-		if len(line) < 2 {
-			continue
-		}
-		if line[0] == '?' || line[1] == '?' {
-			untracked = true
-		}
-		if line[0] == 'M' || line[0] == 'D' || line[0] == 'R' || line[0] == 'A' {
-			staged = true
-		}
-		if line[1] == 'M' || line[1] == 'D' {
-			unstaged = true
-		}
-	}
-	stat.Staged = staged
-	stat.Unstaged = unstaged
-	stat.Untracked = untracked
+	assertSetBool(ctx, repo.Staged, &stat.Staged, "get staged")
+	assertSetBool(ctx, repo.Unstaged, &stat.Unstaged, "get unstaged")
+	assertSetBool(ctx, repo.Untracked, &stat.Untracked, "get untracked")
 
 	// see https://git-scm.com/docs/git-config#FILES
 	confPaths := []string{
 		"/etc/gitconfig",
 		filepath.Join(xdg.ConfigHome(), "git", "config"),
 		os.ExpandEnv("$HOME/.gitconfig"),
-		filepath.Join(root, ".git", "config"),
+		filepath.Join(stat.Base, ".git", "config"),
 	}
 	var conf config.Config
 	for _, path := range confPaths {
@@ -301,115 +204,71 @@ func main() {
 	}
 	stat.Email = conf.Section("user").Option("email")
 
-	stash, err := stashCount(root)
-	assertError(ctx, err, "open stash log")
-	stat.StashCount = stash
+	{
+		stash, err := repo.StashCount()
+		assertError(ctx, err, "open stash log")
+		stat.StashCount = stash
+	}
 
-	stat.BaseName = filepath.Base(root)
+	stat.BaseName = filepath.Base(stat.Base)
 
-	head, err := rep.Head()
-	if err != nil {
-		logger.Warn(err)
-	} else {
-		stat.Branch = head.Name().Short()
-		stat.Revision = head.Hash().String()
+	{
+		lastEmail, lastMessage, lastHash, err := repo.LastCommit()
+		assertError(ctx, err, "get last commit")
+		stat.LastEmail = lastEmail
+		stat.LastMessage = strings.TrimSpace(lastMessage)
+		stat.Revision = lastHash
+	}
+
+	{
+		branch, err := repo.CurrentBranch()
+		assertError(ctx, err, "get current branch")
+		stat.Branch = branch
 		if stat.Branch == "HEAD" {
 			stat.Branch = string(([]rune(stat.Revision))[:6]) + "..."
 		}
+	}
+	{
+		remote, err := repo.Remote(stat.Branch)
+		assertError(ctx, err, "search remote")
 
-		localConf, err := rep.Config()
-		assertError(ctx, err, "get local config")
-		remoteName := localConf.Raw.Section("branch").Subsection(head.Name().Short()).Option("remote")
-		remote := localConf.Remotes[remoteName]
-		var upstreamName plumbing.ReferenceName
-		var repoName string
-		if remote != nil {
-			for _, u := range remote.URLs {
-				if strings.HasPrefix(u, "https://github.com/") {
-					repoName = strings.TrimSuffix(strings.TrimPrefix(u, "https://github.com/"), ".git")
-				}
-			}
-			for _, f := range remote.Fetch {
-				if f.Match(head.Name()) {
-					upstreamName = f.Dst(head.Name())
-					break
-				}
-			}
+		remoteURL, err := repo.RemoteURL(remote)
+		assertError(ctx, err, "search remoteURL")
+		if strings.HasPrefix(remoteURL, "https://github.com/") {
+			stat.BaseName = strings.TrimSuffix(strings.TrimPrefix(remoteURL, "https://github.com/"), ".git")
 		}
-		if repoName != "" {
-			stat.BaseName = repoName
-		}
+	}
 
-		headCommit, err := rep.CommitObject(head.Hash())
-		assertError(ctx, err, "get a last commit")
-		stat.LastEmail = headCommit.Author.Email
-		stat.LastMessage = strings.TrimSpace(headCommit.Message)
+	{
+		upstream, err := repo.Upstream()
+		assertError(ctx, err, "search upstream")
+		stat.Upstream = upstream
+	}
 
-		upstream, err := rep.Reference(upstreamName, true)
+	{
+		ahead, err := repo.AheadCount(stat.Branch)
+		assertError(ctx, err, "count ahead")
+		stat.Ahead = ahead
+	}
 
-		if err == nil {
-			upstreamCommit, err := rep.CommitObject(upstream.Hash())
-			assertError(ctx, err, "get a last commit on upstream")
+	{
+		behind, err := repo.BehindCount(stat.Branch)
+		assertError(ctx, err, "count behind")
+		stat.Behind = behind
+	}
 
-			stat.Upstream = upstreamName.Short()
-			behinds, err := countCommit(rep, upstreamCommit, headCommit)
-			assertError(ctx, err, "traverse behind objects from upstream")
-			stat.Behind = behinds
+	{
+		baseBranch, err := repo.BaseBranch(stat.Branch)
+		assertError(ctx, err, "search base branch")
+		stat.BaseBranch = baseBranch
+	}
 
-			aheads, err := countCommit(rep, headCommit, upstreamCommit)
-			assertError(ctx, err, "traverse ahead objects from upstream")
-			stat.Ahead = aheads
-		} else {
-			logger.WithField("error", err).Warn("failed to get upstream")
-		}
-
-		var baseBranchRef *plumbing.Reference
-		baseBranchName := "origin/master"
-		shortHead := head.Name().Short()
-		matchLength := 0
-		references, err := rep.References()
-		assertError(ctx, err, "fetch references")
-		defer references.Close()
-		assertError(ctx, references.ForEach(func(ref *plumbing.Reference) error {
-			name := ref.Name()
-			if !name.IsBranch() {
-				return nil
-			}
-			short := name.Short()
-			last := short
-			if name.IsRemote() {
-				terms := strings.SplitN(short, "/", 2)
-				if len(terms) < 2 {
-					return nil
-				}
-				last = terms[1]
-			}
-			if len(last) < matchLength {
-				return nil
-			}
-			if strings.HasPrefix(shortHead, last+"-") {
-				matchLength = len(last)
-				baseBranchRef = ref
-				baseBranchName = short
-			}
-			return nil
-		}), "traverse references")
-		stat.BaseBranch = baseBranchName
-
-		if baseBranchRef == nil {
-			ref, err := rep.Reference(plumbing.ReferenceName("refs/remotes/origin/master"), true)
-			assertError(ctx, err, "get origin/master ref")
-			baseBranchRef = ref
-		}
-
-		baseBranchCommit, err := rep.CommitObject(baseBranchRef.Hash())
-		assertError(ctx, err, "get a last commit on base branch")
-
-		baseBehinds, err := countCommit(rep, baseBranchCommit, headCommit)
+	{
+		baseBehinds, err := repo.BehindCountFrom(stat.Branch, stat.BaseBranch)
 		assertError(ctx, err, "traverse behind objects from base branch")
 		stat.BaseBehind = baseBehinds
-		// # (%a) action
 	}
+	// TODO: # (%a) action
 
 	if pretty {
 		writer := json.NewEncoder(os.Stdout)
@@ -418,49 +277,4 @@ func main() {
 	}
 
 	assertError(ctx, tmp.Execute(os.Stdout, stat), "output stats")
-}
-
-func stashCount(dir string) (int, error) {
-	stashLog, err := os.Open(filepath.Join(dir, ".git", "logs", "refs", "stash"))
-	if os.IsNotExist(err) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	defer stashLog.Close()
-	return lineCounter(stashLog)
-}
-
-func lineCounter(r io.Reader) (int, error) {
-	buf := make([]byte, 32*1024)
-	count := 0
-	lineSep := []byte{'\n'}
-
-	for {
-		c, err := r.Read(buf)
-		count += bytes.Count(buf[:c], lineSep)
-
-		switch {
-		case err == io.EOF:
-			return count, nil
-
-		case err != nil:
-			return count, err
-		}
-	}
-}
-
-func runGit(ctx context.Context, args ...string) []byte {
-	command := exec.Command("git", args...)
-	output, err := command.Output()
-	assertError(ctx, err, "run git")
-	if output == nil {
-		return []byte{}
-	}
-	return output
-}
-
-func scan(buf []byte) *bufio.Scanner {
-	return bufio.NewScanner(bytes.NewReader(buf))
 }
