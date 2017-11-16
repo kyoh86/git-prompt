@@ -33,12 +33,9 @@ func OpenDir(dir string) (git *Git, reterr error) {
 	git = &Git{}
 
 	{
-		output, err := runGit(func(cmd *exec.Cmd) {
+		output, _ := runGit(func(cmd *exec.Cmd) {
 			cmd.Dir = dir
 		}, `rev-parse`, `--is-inside-work-tree`)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to open current directory")
-		}
 		if !bytes.Equal([]byte(`true`), bytes.TrimSpace(output)) {
 			return nil, ErrIsNotInWorkingDirectory
 		}
