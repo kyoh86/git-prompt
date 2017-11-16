@@ -23,12 +23,6 @@ func assertError(ctx context.Context, err error, doing string, args ...interface
 	}
 }
 
-func assertSetBool(ctx context.Context, getter func() (bool, error), result *bool, doing string, args ...interface{}) {
-	flag, err := getter()
-	assertError(ctx, err, doing, args...)
-	*result = flag
-}
-
 // Stat holds git statuses
 type Stat struct {
 	Root        string
@@ -67,7 +61,7 @@ func main() {
 			{{- end -}}
 			{{- if gt .StashCount 0 -}}
 				%F{yellow}♻ {{.StashCount}}%f
-			{{- end}} %F{blue}[{{.BaseName}}%f
+			{{- end}} %F{blue}[{{.Name}}%f
 			{{- if ne .Subdir "."}}
 				%F{yellow}/{{.Subdir}}%f
 			{{- end -}}
@@ -93,7 +87,7 @@ func main() {
 			{{- end -}}
 			{{- if gt .StashCount 0 -}}
 			#[fg=yellow]♻ {{.StashCount}}
-			{{- end}} #[fg=blue][{{.BaseName}}
+			{{- end}} #[fg=blue][{{.Name}}
 			{{- if ne .Subdir "." -}}
 			#[fg=yellow]/{{.Subdir}}
 			{{- end -}}

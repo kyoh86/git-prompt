@@ -124,7 +124,7 @@ const (
 )
 
 var (
-	branchRegexp = regexp.MustCompile(`^## (.+)\.\.\.(.+/.+)$`)
+	branchRegexp = regexp.MustCompile(`^## (\S+)\.\.\.(\S+/\S+)( \[(?:ahead|behind) \d+\])?$`)
 )
 
 // Branch :
@@ -209,6 +209,7 @@ func (g *Git) diffCount(baseBranch, headBranch string) (int, error) {
 
 // AheadCountVar :
 func (g *Git) AheadCountVar(v *int) error {
+	//HACK: get from status --porcelain
 	return intSetter(g.AheadCount())(v)
 }
 
@@ -219,6 +220,7 @@ func (g *Git) AheadCount() (int, error) {
 
 // BehindCountVar :
 func (g *Git) BehindCountVar(v *int) error {
+	//HACK: get from status --porcelain
 	return intSetter(g.BehindCount())(v)
 }
 
