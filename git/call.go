@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -22,11 +23,26 @@ type Git struct {
 	cache sync.Map
 }
 
-// func OpenDir(dir string)
+var (
+	// ErrIsNotInWorkingDirectory :
+	ErrIsNotInWorkingDirectory = errors.New("not in working directory")
+)
 
 // OpenDir current directory
 func OpenDir(dir string) (git *Git, reterr error) {
 	git = &Git{}
+
+	{
+		output, err := runGit(func(cmd *exec.Cmd) {
+			cmd.Dir = dir
+		}, `rev-parse`, `--is-inside-work-tree`)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to open current directory")
+		}
+		if !bytes.Equal([]byte(`true`), bytes.TrimSpace(output)) {
+			return nil, ErrIsNotInWorkingDirectory
+		}
+	}
 
 	{
 		output, err := runGit(func(cmd *exec.Cmd) {
@@ -97,122 +113,250 @@ func (g *Git) Root() string {
 	return g.dir
 }
 
-// CurrentBranch will get the current branch
-func (g *Git) CurrentBranch() (string, error) {
-	return str(g.Call("rev-parse", "--abbrev-ref", "--symbolic-full-name", "HEAD"))
+// BranchVar :
+func (g *Git) BranchVar(v *string) error {
+	return stringSetter(g.Branch())(v)
 }
 
-// Upstream will get the upstream of a current branch
+const (
+	branchPrefix     = "## "
+	branchInitPrefix = branchPrefix + "No commits yet on "
+)
+
+var (
+	branchRegexp = regexp.MustCompile(`^## (.+)\.\.\.(.+/.+)$`)
+)
+
+// Branch :
+func (g *Git) Branch() (string, error) {
+	output, err := g.Call("status", "--branch", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	untrackLines := scanner(output)
+	if !untrackLines.Scan() {
+		return "", nil
+	}
+	line := untrackLines.Text()
+	if !strings.HasPrefix(line, branchPrefix) {
+		return "", nil
+	}
+
+	if strings.HasPrefix(line, branchInitPrefix) {
+		return strings.TrimPrefix(line, branchInitPrefix), nil
+	}
+	if matches := branchRegexp.FindStringSubmatch(line); len(matches) >= 2 {
+		return matches[1], nil
+	}
+	return strings.TrimPrefix(line, branchPrefix), nil
+}
+
+// UpstreamVar :
+func (g *Git) UpstreamVar(v *string) error {
+	return stringSetter(g.Upstream())(v)
+}
+
+// Upstream :
 func (g *Git) Upstream() (string, error) {
-	return strOrEmpty(g.Call("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"))
+	output, err := g.Call("status", "--branch", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	untrackLines := scanner(output)
+	if !untrackLines.Scan() {
+		return "", nil
+	}
+	line := untrackLines.Text()
+	if matches := branchRegexp.FindStringSubmatch(line); len(matches) >= 3 {
+		return matches[2], nil
+	}
+	return "", nil
 }
 
-// Remote will get the remote of a branch
+// RemoteVar :
+func (g *Git) RemoteVar(branch string, v *string) error {
+	return stringSetter(g.Remote(branch))(v)
+}
+
+// Remote :
 func (g *Git) Remote(branch string) (string, error) {
 	return strOrEmpty(g.Call("config", "--local", "--get", "branch."+branch+".remote"))
 }
 
-// RemoteURL will get the url of a remote
+// RemoteURLVar :
+func (g *Git) RemoteURLVar(remote string, v *string) error {
+	return stringSetter(g.RemoteURL(remote))(v)
+}
+
+// RemoteURL :
 func (g *Git) RemoteURL(remote string) (string, error) {
-	if remote == "" {
-		return "", nil
-	}
-	return str(g.Call("remote", "get-url", remote))
+	return strOrEmpty(g.Call("remote", "get-url", remote))
 }
 
-// Staged searches staged file
-func (g *Git) Staged() (bool, error) {
-	output, err := g.Call("status", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-	untrackLines := scan(output)
-	for untrackLines.Scan() {
-		line := untrackLines.Text()
-		if len(line) < 1 {
-			continue
-		}
-		if line[0] == 'M' || line[0] == 'D' || line[0] == 'R' || line[0] == 'A' {
-			return true, nil
-		}
-	}
-	return false, nil
+// StashCountVar :
+func (g *Git) StashCountVar(v *int) error {
+	return intSetter(g.StashCount())(v)
 }
 
-// Unstaged searches unstaged file
-func (g *Git) Unstaged() (bool, error) {
-	output, err := g.Call("status", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-	untrackLines := scan(output)
-	for untrackLines.Scan() {
-		line := untrackLines.Text()
-		if len(line) < 2 {
-			continue
-		}
-		if line[1] == 'M' || line[1] == 'D' {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// Untracked searches untracked file
-func (g *Git) Untracked() (bool, error) {
-	output, err := g.Call("status", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-	untrackLines := scan(output)
-	for untrackLines.Scan() {
-		fields := strings.Fields(untrackLines.Text())
-		if len(fields) > 0 && fields[0] == "??" {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// StashCount counts stash list
+// StashCount :
 func (g *Git) StashCount() (int, error) {
 	return count(g.Call("stash", "list"))
 }
 
-// DiffCount counts rev-list between branches
-func (g *Git) DiffCount(baseBranch, headBranch string) (int, error) {
+func (g *Git) diffCount(baseBranch, headBranch string) (int, error) {
 	return countOrZero(g.Call("rev-list", baseBranch+".."+headBranch))
 }
 
-// AheadCount counts rev-list from upstream
-func (g *Git) AheadCount(branch string) (int, error) {
-	return g.DiffCount(branch+"@{u}", branch)
+// AheadCountVar :
+func (g *Git) AheadCountVar(v *int) error {
+	return intSetter(g.AheadCount())(v)
 }
 
-// BehindCount counts rev-list to upstream
-func (g *Git) BehindCount(branch string) (int, error) {
-	return g.BehindCountFrom(branch, branch+"@{u}")
+// AheadCount :
+func (g *Git) AheadCount() (int, error) {
+	return g.diffCount(Head+"@{u}", Head)
 }
 
-// BehindCountFrom counts rev-list between branches
-func (g *Git) BehindCountFrom(branch, baseBranch string) (int, error) {
-	return g.DiffCount(branch, baseBranch)
+// BehindCountVar :
+func (g *Git) BehindCountVar(v *int) error {
+	return intSetter(g.BehindCount())(v)
 }
 
-// BaseBranch find a branch with longest match for.
+// Head :
+const Head = "HEAD"
+
+// BehindCount :
+func (g *Git) BehindCount() (int, error) {
+	return g.BehindCountFrom(Head + "@{u}")
+}
+
+// BehindCountFromVar :
+func (g *Git) BehindCountFromVar(baseBranch string, v *int) error {
+	return intSetter(g.BehindCountFrom(baseBranch))(v)
+}
+
+// BehindCountFrom :
+func (g *Git) BehindCountFrom(baseBranch string) (int, error) {
+	return g.diffCount(Head, baseBranch)
+}
+
+// EmailVar :
+func (g *Git) EmailVar(v *string) error {
+	return stringSetter(g.Email())(v)
+}
+
+// Email :
+func (g *Git) Email() (string, error) {
+	return str(g.Call("config", "user.email"))
+}
+
+// LastCommitterVar :
+func (g *Git) LastCommitterVar(v *string) error {
+	return stringSetter(g.LastCommitter())(v)
+}
+
+// LastCommitter :
+func (g *Git) LastCommitter() (string, error) {
+	return str(g.Call("log", "-n1", "--pretty=%ce"))
+}
+
+// LastCommitMessageVar :
+func (g *Git) LastCommitMessageVar(v *string) error {
+	return stringSetter(g.LastCommitMessage())(v)
+}
+
+// LastCommitMessage :
+func (g *Git) LastCommitMessage() (string, error) {
+	return str(g.Call("log", "-n1", "--pretty=%s"))
+}
+
+// LastCommitHashVar :
+func (g *Git) LastCommitHashVar(v *string) error {
+	return stringSetter(g.LastCommitHash())(v)
+}
+
+// LastCommitHash :
+func (g *Git) LastCommitHash() (string, error) {
+	return str(g.Call("log", "-n1", "--pretty=%h"))
+}
+
+// StagedVar :
+func (g *Git) StagedVar(v *bool) error {
+	return boolSetter(g.Staged())(v)
+}
+
+// Staged :
+func (g *Git) Staged() (bool, error) {
+	output, err := g.Call("status", "--branch", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	var line string
+	for lines := scanFunc(output); lines(&line); {
+		if len(line) >= 1 && (line[0] == 'M' || line[0] == 'D' || line[0] == 'R' || line[0] == 'A') {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// UnstagedVar :
+func (g *Git) UnstagedVar(v *bool) error {
+	return boolSetter(g.Unstaged())(v)
+}
+
+// Unstaged :
+func (g *Git) Unstaged() (bool, error) {
+	output, err := g.Call("status", "--branch", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	var line string
+	for lines := scanFunc(output); lines(&line); {
+		if len(line) >= 2 && (line[1] == 'M' || line[1] == 'D') {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// UntrackedVar :
+func (g *Git) UntrackedVar(v *bool) error {
+	return boolSetter(g.Untracked())(v)
+}
+
+// Untracked :
+func (g *Git) Untracked() (bool, error) {
+	output, err := g.Call("status", "--branch", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	var line string
+	for lines := scanFunc(output); lines(&line); {
+		if strings.HasPrefix(line, "??") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// BaseBranchVar :
+func (g *Git) BaseBranchVar(branch string, v *string) error {
+	return stringSetter(g.BaseBranch(branch))(v)
+}
+
+// BaseBranch :
 func (g *Git) BaseBranch(branch string) (string, error) {
 	output, err := g.Call("branch", "-r")
 	if err != nil {
 		return "", err
 	}
-	remoteLines := scan(output)
-	maxMatched := 0
-	branchBytes := []byte(branch)
-	var baseBranchBytes []byte
 
-	for remoteLines.Scan() {
-		remoteBranch := bytes.TrimSpace(remoteLines.Bytes())
-		remoteFields := bytes.SplitN(remoteBranch, []byte{'/'}, 2)
+	var maxMatched int
+	var baseBranch string
+	var line string
+	for lines := scanFunc(output); lines(&line); {
+		remoteFields := strings.SplitN(line, "/", 2) // 不正確: remote-nameやbranch-nameには/が使用できる
 		if len(remoteFields) < 2 {
 			continue
 		}
@@ -220,44 +364,20 @@ func (g *Git) BaseBranch(branch string) (string, error) {
 		if maxMatched > remoteLength {
 			continue
 		}
-		if bytes.HasPrefix(branchBytes, append(remoteFields[1], '/')) {
+		if strings.HasPrefix(branch, remoteFields[1]+"/") {
 			maxMatched = remoteLength
-			baseBranchBytes = remoteBranch
-		} else if bytes.HasPrefix(branchBytes, append(remoteFields[1], '-')) {
+			baseBranch = line
+		} else if strings.HasPrefix(branch, remoteFields[1]+"-") {
 			maxMatched = remoteLength
-			baseBranchBytes = remoteBranch
+			baseBranch = line
 		}
 	}
 
-	if baseBranchBytes == nil {
+	if baseBranch == "" {
 		return "origin/master", nil
 	}
 
-	return string(baseBranchBytes), nil
-}
-
-// Email will get user account from git config.
-func (g *Git) Email() (string, error) {
-	return str(g.Call("config", "user.email"))
-}
-
-// LastCommit will get the last commit account, message and hash.
-func (g *Git) LastCommit() (email, message, hash string, err error) {
-	head, err := g.Call("log", "-n1", "--pretty=%ce %s %h")
-	if err != nil {
-		return "", "", "", err
-	}
-	fields := bytes.Fields(head)
-	if len(fields) > 0 {
-		email = string(fields[0])
-	}
-	if len(fields) > 1 {
-		message = string(fields[1])
-	}
-	if len(fields) > 2 {
-		hash = string(fields[2])
-	}
-	return
+	return baseBranch, nil
 }
 
 func runGit(mod func(*exec.Cmd), args ...string) ([]byte, error) {

@@ -8,7 +8,17 @@ import (
 	"github.com/pkg/errors"
 )
 
-func scan(buf []byte) *bufio.Scanner {
+func scanFunc(buf []byte) func(*string) bool {
+	s := scanner(buf)
+	return func(v *string) bool {
+		if !s.Scan() {
+			return false
+		}
+		*v = s.Text()
+		return true
+	}
+}
+func scanner(buf []byte) *bufio.Scanner {
 	return bufio.NewScanner(bytes.NewReader(buf))
 }
 
@@ -34,7 +44,7 @@ func count(buf []byte, err error) (int, error) {
 		return 0, err
 	}
 	count := 0
-	diffLines := scan(buf)
+	diffLines := scanner(buf)
 	for diffLines.Scan() {
 		count++
 	}
