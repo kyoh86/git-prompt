@@ -121,7 +121,7 @@ const (
 )
 
 var (
-	branchRegexp = regexp.MustCompile(`^## (\S+)\.\.\.(\S+/\S+)( \[(?:ahead|behind) \d+\])?$`)
+	branchRegexp = regexp.MustCompile(`^## (\S+)\.\.\.(\S+/\S+)( \[(?:ahead \d+)?(?:, )?(?:behind \d+)?\])?$`)
 )
 
 // Branch :
@@ -130,22 +130,20 @@ func (g *Git) Branch() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	untrackLines := scanner(output)
-	if !untrackLines.Scan() {
-		return "", nil
+	var line string
+	for lines := scanFunc(output); lines(&line); {
+		if !strings.HasPrefix(line, branchPrefix) {
+			return "", nil
+		}
+		if strings.HasPrefix(line, branchInitPrefix) {
+			return strings.TrimPrefix(line, branchInitPrefix), nil
+		}
+		if matches := branchRegexp.FindStringSubmatch(line); len(matches) >= 2 {
+			return matches[1], nil
+		}
+		return strings.TrimPrefix(line, branchPrefix), nil
 	}
-	line := untrackLines.Text()
-	if !strings.HasPrefix(line, branchPrefix) {
-		return "", nil
-	}
-
-	if strings.HasPrefix(line, branchInitPrefix) {
-		return strings.TrimPrefix(line, branchInitPrefix), nil
-	}
-	if matches := branchRegexp.FindStringSubmatch(line); len(matches) >= 2 {
-		return matches[1], nil
-	}
-	return strings.TrimPrefix(line, branchPrefix), nil
+	return "", nil
 }
 
 // UpstreamVar :
