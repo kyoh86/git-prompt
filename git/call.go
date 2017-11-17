@@ -204,7 +204,7 @@ func (g *Git) diffCount(baseBranch, headBranch string) (int, error) {
 
 // AheadCountVar :
 func (g *Git) AheadCountVar(v *int) error {
-	//HACK: get from status --porcelain
+	//HACK: get from status --branch --porcelain
 	return intSetter(g.AheadCount())(v)
 }
 
@@ -215,7 +215,7 @@ func (g *Git) AheadCount() (int, error) {
 
 // BehindCountVar :
 func (g *Git) BehindCountVar(v *int) error {
-	//HACK: get from status --porcelain
+	//HACK: get from status --branch --porcelain
 	return intSetter(g.BehindCount())(v)
 }
 

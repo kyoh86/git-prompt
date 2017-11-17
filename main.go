@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	flags "github.com/jessevdk/go-flags"
@@ -37,6 +38,7 @@ type Stat struct {
 	StashCount  int
 	LastEmail   string
 	LastMessage string
+	Wip         bool
 	Upstream    string
 	Behind      int
 	Ahead       int
@@ -51,7 +53,7 @@ func main() {
 			{{- if eq .Unstaged true -}}  - {{- end -}}
 			{{- if eq .Untracked true -}} ? {{- end -}}
 			%f
-			{{- if and (eq .LastMessage "wip") (eq .Email .LastEmail) -}}
+			{{- if and .Wip (eq .Email .LastEmail) -}}
 				%F{red}!wip!%f
 			{{- end -}}
 			{{- if gt .Ahead 0 -}}  %F{red}⬆ {{.Ahead}}%f      {{- end -}}
@@ -155,13 +157,17 @@ func main() {
 	assertError(ctx, repo.UntrackedVar(&stat.Untracked), "get untracked")
 	assertError(ctx, repo.EmailVar(&stat.Email), "get user account")
 	assertError(ctx, repo.StashCountVar(&stat.StashCount), "open stash log")
-	assertError(ctx, repo.LastCommitterVar(&stat.LastEmail), "get last committer")
-	assertError(ctx, repo.LastCommitMessageVar(&stat.LastMessage), "get last commit message")
 	assertError(ctx, repo.LastCommitHashVar(&stat.Hash), "get last commit hash")
 	assertError(ctx, repo.UpstreamVar(&stat.Upstream), "search upstream")
 	assertError(ctx, repo.AheadCountVar(&stat.Ahead), "count ahead")
 	assertError(ctx, repo.BehindCountVar(&stat.Behind), "count behind")
 	assertError(ctx, repo.BranchVar(&stat.Branch), "get current branch")
+	assertError(ctx, repo.LastCommitterVar(&stat.LastEmail), "get last committer")
+	assertError(ctx, repo.LastCommitMessageVar(&stat.LastMessage), "get last commit message")
+	wipRegexp := regexp.MustCompile(`^wip(\W|$)`)
+	if wipRegexp.MatchString(stat.LastMessage) {
+		stat.Wip = true
+	}
 
 	if stat.Branch == "HEAD" {
 		stat.Branch = string(([]rune(stat.Hash))[:6]) + "..."
