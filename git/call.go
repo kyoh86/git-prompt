@@ -374,7 +374,7 @@ func (g *Git) BaseBranch(branch string) (string, error) {
 		return "origin/master", nil
 	}
 
-	return baseBranch, nil
+	return strings.TrimSpace(baseBranch), nil
 }
 
 func runGit(mod func(*exec.Cmd), args ...string) ([]byte, error) {
