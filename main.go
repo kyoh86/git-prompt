@@ -79,7 +79,7 @@ func main() {
 			{{- if eq .Staged true -}}    + {{- end -}}
 			{{- if eq .Unstaged true -}}  - {{- end -}}
 			{{- if eq .Untracked true -}} ? {{- end -}}
-			{{- if and (eq .LastMessage "wip") (eq .Email .LastEmail) -}}
+			{{- if and .Wip (eq .Email .LastEmail) -}}
 			#[fg=red]!wip!
 			{{- end -}}
 			{{- if gt .Ahead 0 -}}  #[fg=red]⬆ {{.Ahead}}      {{- end -}}
