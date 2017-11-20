@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -121,7 +122,7 @@ const (
 )
 
 var (
-	branchRegexp = regexp.MustCompile(`^## (\S+)\.\.\.(\S+/\S+)( \[(?:ahead \d+)?(?:, )?(?:behind \d+)?\])?$`)
+	branchRegexp = regexp.MustCompile(`^## (\S+)\.\.\.(\S+/\S+)(?: \[(?:ahead (\d+))?(?:, )?(?:behind (\d+))?\])?$`)
 )
 
 // Branch :
@@ -131,19 +132,19 @@ func (g *Git) Branch() (string, error) {
 		return "", err
 	}
 	var line string
-	for lines := scanFunc(output); lines(&line); {
-		if !strings.HasPrefix(line, branchPrefix) {
-			return "", nil
-		}
-		if strings.HasPrefix(line, branchInitPrefix) {
-			return strings.TrimPrefix(line, branchInitPrefix), nil
-		}
-		if matches := branchRegexp.FindStringSubmatch(line); len(matches) >= 2 {
-			return matches[1], nil
-		}
-		return strings.TrimPrefix(line, branchPrefix), nil
+	if !scanFunc(output)(&line) {
+		return "", nil
 	}
-	return "", nil
+	if !strings.HasPrefix(line, branchPrefix) {
+		return "", nil
+	}
+	if strings.HasPrefix(line, branchInitPrefix) {
+		return strings.TrimPrefix(line, branchInitPrefix), nil
+	}
+	if matches := branchRegexp.FindStringSubmatch(line); len(matches) > 1 {
+		return matches[1], nil
+	}
+	return strings.TrimPrefix(line, branchPrefix), nil
 }
 
 // UpstreamVar :
@@ -157,12 +158,11 @@ func (g *Git) Upstream() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	untrackLines := scanner(output)
-	if !untrackLines.Scan() {
+	var line string
+	if !scanFunc(output)(&line) {
 		return "", nil
 	}
-	line := untrackLines.Text()
-	if matches := branchRegexp.FindStringSubmatch(line); len(matches) >= 3 {
+	if matches := branchRegexp.FindStringSubmatch(line); len(matches) > 2 {
 		return matches[2], nil
 	}
 	return "", nil
@@ -204,18 +204,35 @@ func (g *Git) diffCount(baseBranch, headBranch string) (int, error) {
 
 // AheadCountVar :
 func (g *Git) AheadCountVar(v *int) error {
-	//HACK: get from status --branch --porcelain
 	return intSetter(g.AheadCount())(v)
+}
+
+func parseInt32(str string) (int, error) {
+	if str == "" {
+		return 0, nil
+	}
+	i64, err := strconv.ParseInt(str, 10, 32)
+	return int(i64), err
 }
 
 // AheadCount :
 func (g *Git) AheadCount() (int, error) {
-	return g.diffCount(Head+"@{u}", Head)
+	output, err := g.Call("status", "--branch", "--porcelain")
+	if err != nil {
+		return 0, err
+	}
+	var line string
+	if !scanFunc(output)(&line) {
+		return 0, nil
+	}
+	if matches := branchRegexp.FindStringSubmatch(line); len(matches) > 3 {
+		return parseInt32(matches[3])
+	}
+	return 0, nil
 }
 
 // BehindCountVar :
 func (g *Git) BehindCountVar(v *int) error {
-	//HACK: get from status --branch --porcelain
 	return intSetter(g.BehindCount())(v)
 }
 
@@ -224,7 +241,18 @@ const Head = "HEAD"
 
 // BehindCount :
 func (g *Git) BehindCount() (int, error) {
-	return g.BehindCountFrom(Head + "@{u}")
+	output, err := g.Call("status", "--branch", "--porcelain")
+	if err != nil {
+		return 0, err
+	}
+	var line string
+	if !scanFunc(output)(&line) {
+		return 0, nil
+	}
+	if matches := branchRegexp.FindStringSubmatch(line); len(matches) > 4 {
+		return parseInt32(matches[4])
+	}
+	return 0, nil
 }
 
 // BehindCountFromVar :

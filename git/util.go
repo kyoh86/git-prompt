@@ -18,6 +18,7 @@ func scanFunc(buf []byte) func(*string) bool {
 		return true
 	}
 }
+
 func scanner(buf []byte) *bufio.Scanner {
 	return bufio.NewScanner(bytes.NewReader(buf))
 }

@@ -188,7 +188,7 @@ func main() {
 		stat.BaseBranch = baseBranch
 	}
 
-	{
+	if stat.Upstream != stat.BaseBranch {
 		baseBehinds, err := repo.BehindCountFrom(stat.BaseBranch)
 		assertError(ctx, err, "traverse behind objects from base branch")
 		stat.BaseBehind = baseBehinds
