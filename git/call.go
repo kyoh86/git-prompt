@@ -53,14 +53,10 @@ func OpenDir(dir string) (git *Git, reterr error) {
 	}
 
 	{
-		tmpFile, err := ioutil.TempFile("", "git-prompt")
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create a tempfile")
-		}
-		git.tmpFile = tmpFile
-	}
-	{
 		src, err := os.Open(filepath.Join(git.dir, ".git", "index"))
+		if os.IsNotExist(err) {
+			return nil, ErrIsNotInWorkingDirectory
+		}
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to open an index file")
 		}
@@ -69,6 +65,14 @@ func OpenDir(dir string) (git *Git, reterr error) {
 				reterr = err
 			}
 		}()
+
+		{
+			tmpFile, err := ioutil.TempFile("", "git-prompt")
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to create a tempfile")
+			}
+			git.tmpFile = tmpFile
+		}
 		buffer := make([]byte, 1024*1024)
 		if _, err := io.CopyBuffer(git.tmpFile, src, buffer); err != nil {
 			return nil, errors.Wrap(err, "failed to copy an index file")
