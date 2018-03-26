@@ -16,14 +16,17 @@
 [[projects]]
   branch = "master"
   name = "github.com/wacul/ulog"
-  packages = [".","adapter/stdlog"]
-  revision = "d0de5afe8355a7aa3ab6b63d8b52dc32a5c64874"
+  packages = [
+    ".",
+    "adapter/stdlog"
+  ]
+  revision = "29f607bf214821a39d36f937bb67a0b0f60f8deb"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/net"
   packages = ["context"]
-  revision = "c7086645de248775cbf2373cf5ca4d2fa664b8c1"
+  revision = "6078986fec03a1dcc236c34816c71b0e05018fda"
 
 [solve-meta]
   analyzer-name = "dep"
