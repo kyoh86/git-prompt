@@ -97,7 +97,7 @@ func main() {
 			#[fg=green]:{{.Branch}}
 			{{- end -}}
 			{{- if eq .Upstream "" -}}#[fg=red]⚑{{end -}}
-			#[fg=blue]]#[fg=default]`,
+			#[fg=blue]]#[fg=default]#[fg=black,bg=colour8]` + "\ue0b0",
 	}
 
 	var option struct {
