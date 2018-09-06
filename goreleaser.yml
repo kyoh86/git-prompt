@@ -23,7 +23,7 @@ builds:
   binary: git-prompt
 archive:
   format: tar.gz
-  name_template: "'{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'"
+  name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
   files:
   - licence*
   - LICENCE*
