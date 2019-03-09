@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -16,10 +15,10 @@ import (
 	"github.com/wacul/ulog"
 )
 
-func assertError(ctx context.Context, err error, doing string, args ...interface{}) {
+func assertError(ctx context.Context, err error, doing string) {
 	if err != nil {
 		logger := ulog.Logger(ctx)
-		logger.WithField("error", err).Error("failed to " + fmt.Sprintf(doing, args...))
+		logger.WithField("error", err).Error("failed to " + doing)
 		panic(err)
 	}
 }
