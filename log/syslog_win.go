@@ -1,5 +1,7 @@
 // +build windows
 
+package log
+
 import (
 	"io"
 	"os"
