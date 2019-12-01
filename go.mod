@@ -6,3 +6,5 @@ require (
 	github.com/wacul/ulog v0.0.0-20180227053909-29f607bf2148
 	golang.org/x/net v0.0.0-20180320002117-6078986fec03 // indirect
 )
+
+go 1.13
