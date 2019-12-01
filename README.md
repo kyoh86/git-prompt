@@ -1,10 +1,9 @@
 # git-prompt
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/kyoh86/git-prompt)](https://goreportcard.com/report/github.com/kyoh86/git-prompt)
-[![CircleCI](https://img.shields.io/circleci/project/github/kyoh86/git-prompt.svg)](https://circleci.com/gh/kyoh86/git-prompt)
-[![Coverage Status](https://img.shields.io/codecov/c/github/kyoh86/git-prompt.svg)](https://codecov.io/gh/kyoh86/git-prompt)
-
 Show prompt strings for tmux, vim and zsh
+
+[![Go Report Card](https://goreportcard.com/badge/github.com/kyoh86/git-prompt)](https://goreportcard.com/report/github.com/kyoh86/git-prompt)
+[![Coverage Status](https://img.shields.io/codecov/c/github/kyoh86/git-prompt.svg)](https://codecov.io/gh/kyoh86/git-prompt)
 
 ## Install
 
