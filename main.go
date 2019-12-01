@@ -9,10 +9,17 @@ import (
 	"regexp"
 	"strings"
 
-	flags "github.com/jessevdk/go-flags"
+	"github.com/alecthomas/kingpin"
 	"github.com/kyoh86/git-prompt/git"
 	"github.com/kyoh86/git-prompt/log"
 	"github.com/wacul/ulog"
+)
+
+// nolint
+var (
+	version = "snapshot"
+	commit  = "snapshot"
+	date    = "snapshot"
 )
 
 func assertError(ctx context.Context, err error, doing string) {
@@ -99,15 +106,16 @@ func main() {
 			#[fg=blue]]#[fg=default]#[fg=black,bg=colour8]` + "\ue0b0",
 	}
 
+	app := kingpin.New("git-prompt", "Show prompt strings for tmux, vim and zsh").Version(version).Author("kyoh86")
 	var option struct {
-		Dir     string `long:"dir" short:"C" description:"working directory"`
-		Style   string `long:"style" short:"s" description:"output style" default:"pretty"`
-		Verbose []bool `long:"verbose" short:"v" description:"log verbose"`
+		Dir     string
+		Style   string
+		Verbose []bool
 	}
+	app.Flag("style", "output style").Short('s').Default("pretty").StringVar(&option.Style)
+	app.Flag("verbose", "log verbose").Short('v').BoolListVar(&option.Verbose)
 
-	if _, err := flags.ParseArgs(&option, os.Args[1:]); err != nil {
-		panic(err)
-	}
+	kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	ctx := log.Background(option.Verbose)
 
