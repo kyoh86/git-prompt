@@ -3,7 +3,6 @@ package log
 import (
 	"context"
 	"log"
-	"log/syslog"
 	"os"
 
 	"github.com/wacul/ulog"
@@ -20,13 +19,8 @@ func Context(ctx context.Context, verbose []bool) context.Context {
 	var level ulog.Level
 	switch len(verbose) {
 	case 0:
-		l, err := syslog.New(syslog.LOG_NOTICE|syslog.LOG_USER, "git-prompt")
-		if err != nil {
-			panic(err)
-		}
-
 		level = ulog.WarnLevel
-		log.SetOutput(l)
+		log.SetOutput(logger())
 	case 1:
 		level = ulog.InfoLevel
 		log.SetOutput(os.Stderr)
