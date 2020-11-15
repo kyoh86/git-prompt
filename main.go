@@ -73,7 +73,7 @@ func main() {
 			{{- if ne .Subdir "."}}
 				%F{yellow}/{{.Subdir}}%f
 			{{- end -}}
-			{{- if and (ne .Branch "master") (ne .Branch "") -}}
+			{{- if and (ne .Branch "main") (ne .Branch "") -}}
 				%F{green}:{{.Branch}}%f
 			{{- end -}}
 			{{- if eq .Upstream "" -}}
@@ -99,7 +99,7 @@ func main() {
 			{{- if ne .Subdir "." -}}
 			#[fg=yellow]/{{.Subdir}}
 			{{- end -}}
-			{{- if and (ne .Branch "master") (ne .Branch "") -}}
+			{{- if and (ne .Branch "main") (ne .Branch "") -}}
 			#[fg=green]:{{.Branch}}
 			{{- end -}}
 			{{- if eq .Upstream "" -}}#[fg=red]⚑{{end -}}
