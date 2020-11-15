@@ -403,7 +403,7 @@ func (g *Git) BaseBranch(branch string) (string, error) {
 	}
 
 	if baseBranch == "" {
-		return "origin/master", nil
+		return "origin/main", nil
 	}
 
 	return strings.TrimSpace(baseBranch), nil
